@@ -1,0 +1,20 @@
+{
+    "name": "EveDataParser",
+    "description": "Deals with Eve Market Data",
+    "private" : "true",
+    "keywords": ["Eve Online", "EVE"],
+    "author" : { "name": "Paul Szerlip",
+        "email": "Paul.Szerlip@cs.ucf.edu",
+        "url": "http://designforcode.com/" },
+    "version": "0.2.6-1",
+    "main":"EveMarketAnalysis.js",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/OptimusLime/EveDataParser.git"
+    },
+    "bugs" : "https://github.com/OptimusLime/EveDataParser/issues",
+    "license":"MIT",
+    "dependencies": {
+        "express" : "3.x.x"
+    }
+}
