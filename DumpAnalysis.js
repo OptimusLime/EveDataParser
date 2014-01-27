@@ -48,12 +48,12 @@ var createExpressServer = function(callback)
     });
 };
 
-
-var compParser = new CompileParser("Z:/Eve/Data/uniqueDump1_24_purchaseData.json", "Z:/Eve/Data/uniqueDump1_24_saleData.json", function()
-{
-
-
-});
+//
+//var compParser = new CompileParser("Z:/Eve/Data/uniqueDump1_24_purchaseData.json", "Z:/Eve/Data/uniqueDump1_24_saleData.json", function()
+//{
+//
+//
+//});
 
 //var parser = new DumpParser(
 //    "Z:/Eve/Data/2014-01-24.dump",
@@ -69,17 +69,17 @@ var compParser = new CompileParser("Z:/Eve/Data/uniqueDump1_24_purchaseData.json
 
 
 
-//var fs = require('fs'), byline = require('byline'), path =require('path');
-//
-//
-//var stream = fs.createReadStream(path.resolve("Z:/Eve/Data/2014-01-24.dump"));;
-//stream = byline.createStream(stream);
-//
-//var cnt = 0;
-//stream.on('data', function(line) {
-//    if(!cnt++)
-//        console.log(line.toString());
-//});
+var fs = require('fs'), byline = require('byline'), path =require('path');
+
+
+var stream = fs.createReadStream(path.resolve("Z:/Eve/Data/2014-01-24.dump"));;
+stream = byline.createStream(stream);
+
+var cnt = 0;
+stream.on('data', function(line) {
+    if(!cnt++)
+        console.log(line.toString());
+});
 
 //
 //var uniqueParser = new DumpParserJSON("Z:/Eve/Data/uniqueDump1_24.json",function()

@@ -1,0 +1,26 @@
+{
+    "tradeID": {"type": "String"},
+    "stationID":  {"type": "String"},
+    "itemID" :  {"type": "String"},
+    "isBuyOrder" : "Boolean",
+    "wasProcessed" : "Boolean",
+    "observedData": [
+        {
+            "tradeID": "String",
+            "regionID": "String",
+            "systemID": "String",
+            "stationID": "String",
+            "typeID": "String",
+            "bid": "String",
+            "price": "String",
+            "minVolume": "String",
+            "volRemain": "String",
+            "volEnter": "String",
+            "issued": "String",
+            "duration": "String",
+            "range": "String",
+            "reportedTime": "String"
+        }
+    ]
+}
+

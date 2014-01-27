@@ -15,6 +15,10 @@
     "bugs" : "https://github.com/OptimusLime/EveDataParser/issues",
     "license":"MIT",
     "dependencies": {
+        "redis" : "*",
+        "q": "*",
+        "traverse" : "*",
+        "mongoose" : "*",
         "express" : "3.x.x"
     }
 }
