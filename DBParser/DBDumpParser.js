@@ -12,7 +12,13 @@ var mongoose = require('mongoose');
 var Generator = require('./generator.js');
 var Maps = require("../IDMapping/IDMapLoader.js");
 
+//using redis for quick insert/retrieval of batch info
+var redis = require("redis")
+    , client = redis.createClient();
+
 module.exports = DBParser;
+
+var batchTradeSize = 500;
 
 var qReadFile = function(file)
 {
@@ -138,7 +144,7 @@ var convertSplitLineToDataObject = function(delimited)
         "regionID": trim11(delimited[ixRegionID]),
         "systemID": trim11(delimited[ixSystemID]),
         "stationID": trim11(delimited[ixStationID]),
-        "typeID": trim11(delimited[ixName]),
+        "itemID": trim11(delimited[ixName]),
         "bid": trim11(delimited[ixBuySell]),
         "price": trim11(delimited[ixPrice]),
         "minVolume": trim11(delimited[ixMinVolume]),
@@ -165,17 +171,45 @@ function DBParser()
     //we need to create our object
     self.generator = new Generator();
 
-    self.qFlushDatabase = function()
+
+    self.qFlushRedis = function()
     {
         var deferred = Q.defer()
 
-
-        self.RawTrade.remove({}, function(err) {
+        client.FLUSHDB(function(err)
+        {
             if(err)
                 deferred.reject(err);
             else
                 deferred.resolve();
         });
+        return deferred.promise;
+    };
+
+    self.qFlushDatabase = function()
+    {
+        var deferred = Q.defer()
+
+        //flush redis first, then mongoDB
+        self.qFlushRedis().done(function()
+        {
+            self.RawTrade.remove({}, function(err) {
+            if(err)
+                deferred.reject(err);
+            else
+                deferred.resolve();
+        });
+
+        }, function(err)
+        {
+            deferred.reject(err);
+        })
+
+
+
+
+
+
 
         return deferred.promise;
     };
@@ -218,12 +252,14 @@ function DBParser()
         return deferred.promise;
     };
 
-    self.qBatchFindIDs = function(idList)
+    self.qBatchFindMetaInfo = function(idList)
     {
         var deferred = Q.defer();
         var mappedObjects = {};
 
-        self.RawTrade.find({tradeID : {$in: idList}}).exec(function(err,doc)
+//        console.log(idList);
+
+        client.mget(idList, function(err, docs)
         {
             if(err)
             {
@@ -231,10 +267,15 @@ function DBParser()
                 return;
             }
 
-            for(var i=0; i < doc.length; i++)
+            for(var i=0; i < docs.length; i++)
             {
-                var queryDoc = doc[i];
-                mappedObjects[queryDoc.tradeID] = queryDoc;
+                //mget returns null for anything not retrieved
+                if(docs[i])
+                {
+                    var queryDoc = JSON.parse(docs[i]);
+                    //create the key from our basic query info
+                    mappedObjects[idList[i]] = queryDoc;
+                }
             }
             deferred.resolve(mappedObjects);
         });
@@ -242,55 +283,144 @@ function DBParser()
         return deferred.promise;
     };
 
-
-    self.qUpdateSingleTrade = function(tradeObject)
+    self.qFindBatchObjects = function(batchList)
     {
+
         var deferred = Q.defer();
+        var mappedObjects = {};
 
-        self.RawTrade.find({tradeID : tradeObject.tradeID})
-            .exec(function(err, docs)
-            {
-                if(docs.length == 0)
+        self.RawTrade.find({batchID : {$in: batchList}}).exec(function(err,docs)
+        {
+            if(docs.length != batchList.length){
+
+                var uBatch = {};
+                for(var i=0; i < batchList.length; i++)
                 {
-                    //we have no object matching this description! Let's make a new one!
-                    tradeObject.save(function(err)
-                    {
-                        if(err)
-                            deferred.reject("Error in trade save: ", err);
-                        else
-                        //done!
-                        deferred.resolve();
-                    });
+                    uBatch[batchList[i]] = batchList[i];
                 }
-                else
+                for(var i=0; i < docs.length; i++)
                 {
-                    if(docs.length > 1)
+                    var d = docs[i];
+
+                    //remove the batch object we already have
+                    delete uBatch[d.batchID];
+                }
+
+                var missingCount = Object.keys(uBatch).length;
+
+                //now we go get um
+                self.RawTrade.find({batchID : {$in: Object.keys(uBatch)}}).exec(function(err,missing)
+                {
+                    if(missing.length != missingCount)
                     {
-                        console.log('Error!')
-                        deferred.reject("Duplicate object in DB");
-                        return;
+                        console.log(uBatch);
+                        console.log(missing.length + " out of " + missingCount + " misses requested: ");
+                        deferred.reject("Error! Number of batch objects not equal to list size.");
                     }
+                    else
+                    {
+                        docs = docs.concat(missing);
 
-                    var queryTrade = docs[0];
+                        for(var i=0; i < docs.length; i++)
+                        {
+                            mappedObjects[docs[i].batchID] = docs[i];
+                        }
 
-                    //concat our arrays together, for science!
-                    queryTrade.observedData = queryTrade.observedData.concat(tradeObject.observedData);
-                    //note this should ruin any previous processed info
-                    queryTrade.wasProcessed = false;
+                        //have all our documents mapped out
+                        deferred.resolve(mappedObjects);
+                    }
+                });
+            }
+            else
+            {
 
-                    queryTrade.markModified("observedData");
-                    queryTrade.save(function(err) {
-                        if(err)
-                            deferred.reject("Error in trade update save: ", err);
-                        else
-                        //done!
-                            deferred.resolve();
-                    });
+                for(var i=0; i < docs.length; i++)
+                {
+                    mappedObjects[docs[i].batchID] = docs[i];
                 }
-            });
+
+                //have all our documents mapped out
+                deferred.resolve(mappedObjects);
+            }
+
+        });
 
         return deferred.promise;
     };
+
+//    self.qBatchFindIDs = function(idList)
+//    {
+//        var deferred = Q.defer();
+//        var mappedObjects = {};
+//
+//        self.RawTrade.find({tradeID : {$in: idList}}).exec(function(err,doc)
+//        {
+//            if(err)
+//            {
+//                deferred.reject(err);
+//                return;
+//            }
+//
+//            for(var i=0; i < doc.length; i++)
+//            {
+//                var queryDoc = doc[i];
+//                mappedObjects[self.groupKey(queryDoc)] = queryDoc;
+//            }
+//            deferred.resolve(mappedObjects);
+//        });
+//
+//        return deferred.promise;
+//    };
+
+
+//    self.qUpdateSingleTrade = function(tradeObject)
+//    {
+//        var deferred = Q.defer();
+//
+//        self.RawTrade.find({tradeID : tradeObject.tradeID})
+//            .exec(function(err, docs)
+//            {
+//                if(docs.length == 0)
+//                {
+//                    //we have no object matching this description! Let's make a new one!
+//                    tradeObject.save(function(err)
+//                    {
+//                        if(err)
+//                            deferred.reject("Error in trade save: ", err);
+//                        else
+//                        //done!
+//                        deferred.resolve();
+//                    });
+//                }
+//                else
+//                {
+//                    if(docs.length > 1)
+//                    {
+//                        console.log('Error!')
+//                        deferred.reject("Duplicate object in DB");
+//                        return;
+//                    }
+//
+//                    var queryTrade = docs[0];
+//
+//                    //concat our arrays together, for science!
+//                    queryTrade.observedData = queryTrade.observedData.concat(tradeObject.observedData);
+//                    //note this should ruin any previous processed info
+//                    queryTrade.wasProcessed = false;
+//
+//                    queryTrade.markModified("observedData");
+//                    queryTrade.save(function(err) {
+//                        if(err)
+//                            deferred.reject("Error in trade update save: ", err);
+//                        else
+//                        //done!
+//                            deferred.resolve();
+//                    });
+//                }
+//            });
+//
+//        return deferred.promise;
+//    };
 
     self.qSaveDB = function(modelToSave)
     {
@@ -307,81 +437,314 @@ function DBParser()
         return deferred.promise;
     };
 
+    self.qSaveKeyValues = function(valueMap)
+    {
+        var deferred = Q.defer();
+
+        var saveFormat = [];
+
+//        console.log("Trying to save: ", valueMap);
+        for(var key in valueMap)
+        {
+            saveFormat.push(key);
+            if(typeof valueMap[key] != "string")
+                saveFormat.push(JSON.stringify(valueMap[key]));
+            else
+                saveFormat.push(valueMap[key]);
+        }
+
+        client.mset(saveFormat, function(err)
+        {
+            if(err)
+                deferred.reject(err);
+            else
+                deferred.resolve();
+        });
+
+        return deferred.promise;
+    };
+
+//    self.qConcurrentFetch = function(metaInfo, batchInfo)
+//    {
+//
+//        var deferred = Q.defer();
+//
+//        Q.all(self.qFindBatchObjects(batchInfo), self.qWriteRedisInfo(metaInfo))
+//            .done(function(infoArray)
+//        {
+//                deferred.resolve(infoArray);
+//        }, function(err)
+//            {
+//                deferred.reject(err);
+//            });
+//
+//        return deferred.promise;
+//    };
+
     self.qProcessRawChunkIntoDB = function(dbEntryByTradeID)
     {
         var deferred = Q.defer();
 
+        console.log('Chunking data');
+
         //we need to collect all our objects into a list of entries
-        var dbEntries = {};
-        var dbTradeIDs = [];
-        for(var tradeID in dbEntryByTradeID)
+        var dbEntries = {}, dbCounts = {};
+        var dbGroupKeys = [];
+        for(var groupKey in dbEntryByTradeID)
         {
-//            console.log(dbEntryByTradeID[stationID]);
-            //create a databasae object from our JSON entries
-            dbEntries[tradeID] = (new self.RawTrade(dbEntryByTradeID[tradeID]));
-            dbTradeIDs.push(tradeID);
+            //we count how many objects we have for each group key
+            dbCounts[groupKey] = dbEntryByTradeID[groupKey].observedData.length;
+            dbEntries[groupKey] = dbEntryByTradeID[groupKey];//(new self.RawTrade(dbEntryByTradeID[groupKey]));
+            dbGroupKeys.push(groupKey);
         }
 
+        var metaUpdate, batchKeys;
 
-        //we search for all these ids in a batch
-        //then whatever we don't find, we save
-        self.qBatchFindIDs(dbTradeIDs)
-            .then(function(mappedDocuments)
+//        console.log("Attempt keys: ", dbGroupKeys)
+
+        self.qBatchFindMetaInfo(dbGroupKeys)
+            .then(function(mappedMeta)
             {
-                var saveDocuments = [];
+                //
+                var fetchExisting = [];
+
+                batchKeys = [];
+
+//                console.log(mappedMeta);
 
                 //we have a collection of mapped documents, so we either update, or create new
-                for(var tID in mappedDocuments)
+                for(var gKey in mappedMeta)
                 {
-                    //if we have it in mapped documents, we do a merge
-                    var existingTrade = mappedDocuments[tID];
-                    var queryTrade = dbEntries[tID];
+                    //we have a group key, and the meta info
+                    var metaInfo = mappedMeta[gKey];
+
+                    var lastBatchNumber = Math.floor(metaInfo.totalCount/metaInfo.batchSize);
 
 
-                    //concat our arrays together, for science!
-                    existingTrade.observedData = existingTrade.observedData.concat(queryTrade.observedData);
-                    //note this should ruin any previous processed info
-                    existingTrade.wasProcessed = false;
+                    //if this was equal, we'd have an EXACT match
+                    //if we had an exact match, then the batch entry wasn't created yet
+                    if(lastBatchNumber*metaInfo.batchSize != metaInfo.totalCount)
+                    {
+                        //fetch the last batch object for this guy
+                        fetchExisting.push(self.batchKey(gKey, lastBatchNumber));
+                    }
+                    else
+                    {
+                        console.log('EXACT MATCH DETECTED -- likely no batch file exists');
+                    }
 
-                    //we've updated some info, make sure it knows the array has changed
-                    existingTrade.markModified("observedData");
+                    //we need to know all the batches we're interested in
+                    batchKeys.push(self.batchKey(gKey, lastBatchNumber));
 
-                    //now, we'll save this later
-                    saveDocuments.push(existingTrade);
+                    //update the meta info
+                    metaInfo.totalCount += dbCounts[gKey];
 
-                    //remove from db entries
-                    delete dbEntries[tID];
+                    //deleting the group key, we'll need to create meta info for everything that failed in this retrieval
+                    delete dbCounts[gKey];
                 }
 
-                //what's left was never found in the db, we just save them straight up
-                for(var tID in dbEntries)
+                //we need to create new meta information and new batch objects for each object in here
+                for(var gKey in dbCounts)
                 {
-                    saveDocuments.push(dbEntries[tID]);
+                    mappedMeta[gKey] =
+                    {
+                        totalCount : dbCounts[gKey],
+                        batchSize: batchTradeSize
+                    };
+
+                    //this is our first batch friend!
+                    batchKeys.push(self.batchKey(gKey, 0));
                 }
-                if(saveDocuments.length != dbTradeIDs.length)
+
+                //Meta info setup for all the objects, and it's all up to date
+                metaUpdate = mappedMeta;
+
+                //we'll update meta after we have finished everyghing
+                //we need to fetch first
+
+//                console.log('Finding batches: ', fetchExisting);
+
+                return self.qFindBatchObjects(fetchExisting)
+            })
+            .then(function(mappedBatch)
+            {
+
+                console.log('Mapped batch reutnr mongod');
+                //here, we're going to create all of our batches, ready for saving
+                var batchesToSave = [];
+
+                //batchKey holds all our batch keys duh
+                for(var i=0; i < batchKeys.length; i++)
                 {
-                    deferred.reject("ERROR! Incorrect number of saved items, something went wrong")
-                    return;
+                    //grab the batch key
+                    var bKey = batchKeys[i];
+                    //split it to find component parts
+                    //the group key and the batch number
+                    var splitBatch = bKey.split("_");
+
+                    var groupKey = splitBatch[0];
+                    //parse the batch number from the split object
+                    var currentBatchNum = parseInt(splitBatch[1]);
+
+                    //we'll slice up the current arrays
+                    var startIx, endIx;
+
+                    //here are the objects we want added (from our db entries above)
+                    var toBeAdded = dbEntries[groupKey];
+                    //how many chunks of info will be batched up
+                    var totalAddCount = toBeAdded.observedData.length;
+
+                    //you already have previously mapped info
+                    //merge needed!
+                    if(mappedBatch[bKey])
+                    {
+                        //we already have a batch setup, let's pump it full of stuff
+                        var batchDocument = mappedBatch[bKey];
+                        //use the group key to get our entry info
+
+                        var remainingInBatch = batchTradeSize - batchDocument.observedData.length;
+
+                        if(remainingInBatch > 0)
+                        {
+                            startIx = 0;
+                            endIx = remainingInBatch;
+                            var sliceRemaining = toBeAdded.observedData.slice(startIx, endIx);
+                            batchDocument.observedData = batchDocument.observedData.concat(sliceRemaining);
+
+                            //note that we modified data here
+
+                            batchDocument.markModified("observedData");
+                            batchesToSave.push(batchDocument);
+                        }
+
+                        startIx = remainingInBatch;
+                        totalAddCount -= remainingInBatch;
+                        //now we move our end forward -- either by the amount remaining or the full batch size
+                        endIx += Math.min(totalAddCount, batchTradeSize);
+                        currentBatchNum++;
+
+                    }
+                    else
+                    {
+                        startIx = 0;
+                        endIx =  Math.min(totalAddCount, batchTradeSize);
+                    }
+
+                    var leftToBatch = Math.ceil(totalAddCount/batchTradeSize);
+
+                        for(var x=0; x < leftToBatch; x++)
+                        {
+                            var amount = Math.min(totalAddCount, batchTradeSize);
+
+                            //we need to create a batch for each time we do this
+                            var newEntry = new self.RawTrade(
+                            {
+                                "batchID" : self.batchKey(groupKey, currentBatchNum),
+                                "tradeID" :  dbEntries[groupKey].tradeID,
+                                "stationID" : dbEntries[groupKey].stationID,
+                                "systemID" : dbEntries[groupKey].systemID,
+                                "regionID" : dbEntries[groupKey].regionID,
+                                "itemID" : dbEntries[groupKey].itemID,
+                                "isBuyOrder" : (dbEntries[groupKey].bid == "1"),
+                                "wasProcessed" : false,
+                                "observedData" : toBeAdded.observedData.slice(startIx, endIx)
+                            });
+
+                            //now we add this entry for saving
+                            batchesToSave.push(newEntry);
+
+                            startIx += amount; endIx += batchTradeSize;
+                            totalAddCount -= amount;
+                            currentBatchNum++;
+                        }
                 }
+
+                console.log('Saving all')
 
                 //then save all documents at the same time
                 var promiseList = [];
-                for(var i=0; i < saveDocuments.length; i++)
+                for(var i=0; i < batchesToSave.length; i++)
                 {
-                    promiseList.push(self.qSaveDB(saveDocuments[i]));
+                    promiseList.push(self.qSaveDB(batchesToSave[i]));
                 }
 
                 //make sure they all complete as a batch
-                Q.all(promiseList)
-                    .done(function()
-                    {
-                        deferred.resolve();
-                    }, function(err)
-                    {
-                        //nope, didn't work
-                        deferred.reject(err);
-                    });
+                return Q.all(promiseList)
+            })
+            .then(function()
+            {
+                console.log('Updating meta info');
+                //now we have to save all our meta things, -- last piece for completion!
+                return self.qSaveKeyValues(metaUpdate);
+            })
+            .done(function()
+            {
+                deferred.resolve();
+            }, function(err)
+            {
+                //nope, didn't work
+                deferred.reject(err);
             });
+
+        //we search for all these ids in a batch
+        //then whatever we don't find, we save
+//        self.qBatchFindIDs(dbGroupKeys)
+//            .then(function(mappedDocuments)
+//            {
+//                var saveDocuments = [];
+//
+//                //we have a collection of mapped documents, so we either update, or create new
+//                for(var tID in mappedDocuments)
+//                {
+//                    //if we have it in mapped documents, we do a merge
+//                    var existingTrade = mappedDocuments[tID];
+//                    var queryTrade = dbEntries[tID];
+//
+//
+//                    //concat our arrays together, for science!
+//                    existingTrade.observedData = existingTrade.observedData.concat(queryTrade.observedData);
+//                    //note this should ruin any previous processed info
+//                    existingTrade.wasProcessed = false;
+//
+//                    //we've updated some info, make sure it knows the array has changed
+//                    existingTrade.markModified("observedData");
+//
+//                    //now, we'll save this later
+//                    saveDocuments.push(existingTrade);
+//
+//                    //remove from db entries
+//                    delete dbEntries[tID];
+//                }
+//
+//                //what's left was never found in the db, we just save them straight up
+//                for(var tID in dbEntries)
+//                {
+//                    saveDocuments.push(dbEntries[tID]);
+//                }
+//                if(saveDocuments.length != dbGroupKeys.length)
+//                {
+//                    deferred.reject("ERROR! Incorrect number of saved items, something went wrong")
+//                    return;
+//                }
+//
+//                //then save all documents at the same time
+//                var promiseList = [];
+//                for(var i=0; i < saveDocuments.length; i++)
+//                {
+//                    promiseList.push(self.qSaveDB(saveDocuments[i]));
+//                }
+//
+//                //make sure they all complete as a batch
+//                Q.all(promiseList)
+//                    .done(function()
+//                    {
+//                        deferred.resolve();
+//                    }, function(err)
+//                    {
+//                        //nope, didn't work
+//                        deferred.reject(err);
+//                    });
+//            });
 
         return deferred.promise;
     };
@@ -402,9 +765,14 @@ function DBParser()
 
     //We write a function for loading up the file, then parsing line by line
 
+    self.batchKey = function(gKey, batchNumber)
+    {
+        return gKey + "_" + batchNumber;
+    };
     self.groupKey = function(innerObject)
     {
-        return innerObject.tradeID;// innerObject.stationID + "|" + innerObject.itemID;
+//        return innerObject.tradeID;//
+        return innerObject.regionID + "|" + innerObject.itemID;
     };
 
     self.qParseLocalFile = function(file)
@@ -419,9 +787,9 @@ function DBParser()
 
         var skipFirstLine = true;
         var lineCount = 0;
-        var maxLines = 10000;
+        var maxLines = 25000;
 
-        var maxToProcess = 1000000;
+        var maxToProcess = 100000;
         var totalProcessed = 0;
 
         var dbEntryByTradeID = {};
@@ -449,6 +817,7 @@ function DBParser()
                 //now we check if we've seen it before during local processing
                 //we don't want duplicates!
                 var groupKey = self.groupKey(innerObject);
+//                console.log(innerObject);
 
 //                console.log(innerObject.reportedBy, " time: ", innerObject.reportedTime);
 
@@ -458,6 +827,8 @@ function DBParser()
                     {
                         "tradeID" : innerObject.tradeID,
                         "stationID" : innerObject.stationID,
+                        "systemID" : innerObject.systemID,
+                        "regionID" : innerObject.regionID,
                         "itemID" : innerObject.itemID,
                         "isBuyOrder" : (innerObject.bid == "1"),
                         "wasProcessed" : false,
@@ -467,23 +838,23 @@ function DBParser()
                 else
                 {
                     //we prevent duplicate adds on each object
-                    var oData = dbEntryByTradeID[groupKey].observedData;
-                    var addData = true;
-                    for(var i=0; i < oData.length; i++)
-                    {
-                        if(innerObject.volRemain == oData[i].volRemain)
-                        {
-                            addData = false;
-                        }
-                    }
+//                    var oData = dbEntryByTradeID[groupKey].observedData;
+//                    var addData = true;
+//                    for(var i=0; i < oData.length; i++)
+//                    {
+//                        if(innerObject.volRemain == oData[i].volRemain)
+//                        {
+//                            addData = false;
+//                        }
+//                    }
 
-                    if(addData)
-                    {
+//                    if(addData)
+//                    {
                         //otherwise, we already have observed data! Push is in
                         dbEntryByTradeID[groupKey].observedData.push(innerObject);
                         //note this should ruin any previous processed info
                         dbEntryByTradeID[groupKey].wasProcessed = false;
-                    }
+//                    }
                 }
 
                 lineCount++;

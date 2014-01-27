@@ -36,6 +36,7 @@ else
         })
         .then(function()
         {
+
             return parser.qParseLocalFile("Z:/Eve/Data/2014-01-24.dump")
         })
         .done(function()
