@@ -18,6 +18,10 @@ var redis = require("redis")
 
 module.exports = DBParser;
 
+var metaInformationKey = "regionInformation";
+var rawSchemaName = "RawTradeSchema";
+
+
 var batchTradeSize = 500;
 
 var qReadFile = function(file)
@@ -161,7 +165,6 @@ var convertSplitLineToDataObject = function(delimited)
 
 
 
-var rawSchemaName = "RawTradeSchema";
 
 
 function DBParser()
@@ -481,6 +484,8 @@ function DBParser()
 //        return deferred.promise;
 //    };
 
+
+
     self.qProcessRawChunkIntoDB = function(dbEntryByTradeID)
     {
         var deferred = Q.defer();
@@ -769,6 +774,12 @@ function DBParser()
     {
         return gKey + "_" + batchNumber;
     };
+
+    self.groupKeyComponents = function(gKey)
+    {
+        return gKey.split('|');
+    };
+
     self.groupKey = function(innerObject)
     {
 //        return innerObject.tradeID;//
@@ -930,4 +941,211 @@ function DBParser()
 
         return deferred.promise;
    }
+
+
+    self.qProcessMapIntoDB = function(mapOfItems)
+    {
+        var deferred = Q.defer();
+
+        var metaObjects = {};
+
+        var allKeyList = [];
+
+        //now we create a list of items
+        for(var key in mapOfItems)
+        {
+            var valueObject = mapOfItems[key];
+
+            //flatten our object into a list
+            var valueList = [];
+            for(var vKey in valueObject)
+                valueList.push(vKey);
+
+
+            var metaKey = key + "_meta";
+
+            metaObjects[metaKey] = JSON.stringify(
+            {
+                "key" : key,
+                "metaKey" : metaKey,
+                "itemList" : valueList
+            });
+
+            allKeyList.push(key);
+        }
+
+        metaObjects[metaInformationKey] =JSON.stringify(
+        {
+            metaKey : metaInformationKey,
+            keyList : allKeyList
+        });
+
+        self.qSaveKeyValues(metaObjects)
+            .done(function()
+            {
+                deferred.resolve();
+            }, function(err)
+            {
+                deferred.reject(err);
+            });
+
+
+        return deferred.promise;
+    }
+
+    self.qSwitchDB = function(dbVar)
+    {
+        var deferred = Q.defer();
+
+        client.select(dbVar, function(err,res){
+            // you'll want to check that the select was successful here
+            // if(err) return err;
+
+            if(err)
+                deferred.reject(err);
+            else
+                deferred.resolve();
+        });
+
+        return deferred.promise;
+    };
+
+    self.qGroupKeyMap = function(file)
+    {
+        var deferred = Q.defer();
+
+        //fix the path for searching -- then let's dod this thang
+        file = path.resolve(file);
+
+        //so let's go through the stream of lines one by one, adding to the database
+        //we'll make a promise to add to the database for each line (processing batches at a time)
+
+        var skipFirstLine = true;
+        var lineCount = 0;
+        var maxLines = 100000;
+
+        var maxToProcess = 100000;
+        var totalProcessed = 0;
+
+
+        var regionsAndItems = {};
+
+
+        var stream = fs.createReadStream(file);
+        stream = byline.createStream(stream);
+
+        stream.on('data', function(line) {
+            if(skipFirstLine)
+            {
+                skipFirstLine = false;
+            }
+            else
+            {
+                //we need to quickly parse this, then get it into a database suitable form
+
+                //get rid of any quotation marks
+                var delimited = line.toString().replace("\r", "").replace(/"/g, "").split(",");
+
+                //have our inner object created from the split line
+                var innerObject= convertSplitLineToDataObject(delimited);
+
+
+                var groupKey = self.groupKey(innerObject);
+
+                //get the first and second part of the group key
+                var gComponents = self.groupKeyComponents(groupKey);
+
+                var key = gComponents[0];
+                var value = gComponents[1];
+
+                if(!value)
+                {
+                    throw new Error("Group key must have 2 pieces for this to work in parsing");
+                }
+
+
+                //create our object as well as the start of the value
+                if(!regionsAndItems[key])
+                    regionsAndItems[key] = {};
+
+
+                regionsAndItems[key][value] = true;
+
+                //that's it, we have all our regions and their itemIDs
+                lineCount++;
+
+                if(lineCount == maxLines)
+                {
+                    //halt the stream
+                    stream.pause();
+
+                    console.log('Saving chunk of parsed objects');
+
+                    //process the lines
+                    self.qProcessMapIntoDB(regionsAndItems)
+                        .done(function()
+                        {
+                            //here we would continue -- but not us boy-o
+                            //just testing for right now
+                            totalProcessed += maxLines;
+
+                            console.log('Finished processing chunk. Next please @ ', totalProcessed);
+                            lineCount = 0;
+
+                            //now we go forever!
+//                            if(totalProcessed >= maxToProcess)
+//                                deferred.resolve();
+//                            else
+                                stream.resume();
+
+                        }, function(err)
+                        {
+                            deferred.reject(err);
+                        });
+
+
+                    //continue the stream
+                }
+            }
+        });
+
+        stream.on('end', function()
+        {
+            //almost finished!
+            //make sure everything is saved
+            if(lineCount > 0)
+            {
+                //process the lines
+                self.qProcessMapIntoDB(regionsAndItems)
+                    .done(function()
+                    {
+                        //here we would continue -- but not us boy-o
+                        //just testing for right now
+                        totalProcessed += lineCount;
+
+                        console.log('Last chunk processed. Final @ ', totalProcessed);
+                        lineCount = 0;
+
+                        deferred.resolve();
+
+                    }, function(err)
+                    {
+                        deferred.reject(err);
+                    });
+            }
+
+
+
+
+        });
+
+
+
+        return deferred.promise;
+    }
+
+
+
+
+
 }

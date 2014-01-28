@@ -36,8 +36,13 @@ else
         })
         .then(function()
         {
-
-            return parser.qParseLocalFile("Z:/Eve/Data/2014-01-24.dump")
+            //switch to database 1!
+            return parser.qSwitchDB(1);
+        })
+        .then(function()
+        {
+//            return parser.qGroupKeyMap("Z:/Eve/Data/2014-01-24.dump");
+//            return parser.qParseLocalFile("Z:/Eve/Data/2014-01-24.dump")
         })
         .done(function()
         {

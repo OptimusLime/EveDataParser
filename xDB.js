@@ -19,13 +19,13 @@ var parser = new DBParser();
 //flush our database first
 var FLUSHTHEDATABASE = false;
 
-parser.qConnect()
-    .then(parser.qFlushDatabase)
-    .done(function()
-    {
-        //nuffin left to do
-        console.log('DB Flushed');
-    });
+//parser.qConnect()
+//    .then(parser.qFlushDatabase)
+//    .done(function()
+//    {
+//        //nuffin left to do
+//        console.log('DB Flushed');
+//    });
 
 //var fs = require('fs');
 //var path = require('path');
@@ -37,27 +37,27 @@ parser.qConnect()
 //Q.longStackSupport = true;
 //
 ////turn a JSON file into a database schema. Shweet.
-//var Maps = require("./IDMapping/IDMapLoader.js");
-////
-//var parser = new DBParser();
+var Maps = require("./IDMapping/IDMapLoader.js");
 //
-//Maps.qEnsureMapsLoaded()
-//    .then(function()
-//    {
-//        return parser.qConnect();
-//    })
-//    .then(function()
-//    {
-//        return parser.qRawDBCount();
-//    })
-//    .done(function(count)
-//    {
-//        console.log('Counted items: ' + count);
-//        console.log('Parse dump success! Onwards and upwards!');
-//    },function(err)
-//    {
-//        console.log('Oh no error!', err);
-//    });
-//
-//
-//
+var parser = new DBParser();
+
+Maps.qEnsureMapsLoaded()
+    .then(function()
+    {
+        return parser.qConnect();
+    })
+    .then(function()
+    {
+        return parser.qRawDBCount();
+    })
+    .done(function(count)
+    {
+        console.log('Counted items: ' + count);
+        console.log('Parse dump success! Onwards and upwards!');
+    },function(err)
+    {
+        console.log('Oh no error!', err);
+    });
+
+
+
