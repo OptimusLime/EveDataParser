@@ -20,7 +20,7 @@ var metaInformationKey = "regionInformation";
 
 var metaAllItemsKey = "allItemsList";
 
-var regionSchemaName = "regionSchema";
+var finalSchemaName = "finalSchema";
 
 //output our object
 module.exports = DBSorter;
@@ -191,7 +191,7 @@ function DBSorter()
     self.qRegionDBCount = function()
     {
         var deferred= Q.defer();
-        self.RegionModel.count({}, function(err, count)
+        self.FinalModel.count({}, function(err, count)
         {
             if(err)
                 deferred.reject(err);
@@ -205,7 +205,7 @@ function DBSorter()
     {
         var deferred= Q.defer();
 
-        var rObject = new self.RegionModel(mObject);
+        var rObject = new self.FinalModel(mObject);
 
         rObject.save(function(err)
         {
@@ -222,7 +222,7 @@ function DBSorter()
     {
         var deferred= Q.defer();
 
-        self.RegionModel.remove({}, function(err)
+        self.FinalModel.remove({}, function(err)
         {
             if(err)
                 deferred.reject(err);
@@ -300,7 +300,7 @@ function DBSorter()
                 self.connection = connection;
                 self.generator.setConnection(connection);
 
-                return qReadFile(path.resolve(__dirname, "../DBSorting/sortSchema.json"));
+                return qReadFile(path.resolve(__dirname, "../DBFinal/finalSchema.json"));
             })
             .then(function(regionSchema)
             {
@@ -309,17 +309,21 @@ function DBSorter()
 
                 //now we have the actual schema
                 //we load it into our database as it's own database
-                self.generator.loadSingleSchema(regionSchemaName, comSchema);
+                self.generator.loadSingleSchema(finalSchemaName, comSchema);
 
                 //store the class inside the parser, we're ready to proceed with Dump parsing
-                self.RegionModel = self.generator.getSchemaModel(regionSchemaName);
+                self.FinalModel = self.generator.getSchemaModel(finalSchemaName);
 
-                return self.qGetMetaList();
+                return self.qGetMetaItemList();
             })
             .done(function(metaData)
             {
+                var itemList = [];
+                for(var key in metaData.knownMap)
+                    itemList.push(key);
+
                 //we grab the region list as the first thing to do
-                self.regionList = metaData.keyList;
+                self.itemList = itemList;
                 deferred.resolve();
 
             }, function(err){
@@ -330,14 +334,14 @@ function DBSorter()
         return deferred.promise;
     };
 
-    self.qGetMetaList = function()
+    self.qGetMetaItemList = function()
     {
-        return self.qRedisSwitchDB(1)
+        return self.qRedisSwitchDB(3)
             .then(function()
             {
                 console.log('Fetching meta info about regions')
 
-                return self.qRedisGetObject(metaInformationKey)
+                return self.qRedisGetObject(metaAllItemsKey)
             });
     };
     self.qRedisKeySearch = function(keySearch)
@@ -360,7 +364,7 @@ function DBSorter()
     };
 
     //assume connected
-    self.qSortRegionData = function(startRegionIx)
+    self.qFinalizeData = function(startRegionIx)
     {
         console.log(startRegionIx);
         var deferred = Q.defer();
@@ -378,13 +382,12 @@ function DBSorter()
 //            })
 
         var itemToRegionMap = {};
-        var knownItems = [];
 
-        var regionKey = self.regionList[startRegionIx];
+        var itemKey = self.itemList[startRegionIx];
 
         var compileItem =
         {
-            "regionID" : regionKey,
+            "itemID" : itemKey,
             "confirmedBought": [],
             "confirmedSold": []
         };
@@ -395,59 +398,61 @@ function DBSorter()
 //            .then(function(){
 //                return self.qRedisSwitchDB(2);
 //            })
-        self.qRedisSwitchDB(2)
+        self.qRedisSwitchDB(3)
             .then(function()
             {
-                return self.qRedisKeySearch(regionKey + "*")
+                return self.qRedisGetObject(itemKey);
             })
             .then(function(regionItemKeys)
             {
-                if(regionItemKeys.length == 0)
+                console.log(regionItemKeys);
+                if(regionItemKeys.regions.length == 0)
                 {
                     emptyRegion = true;
                     //WE DON'T need to look any further, it's empty
                 }
-                else
-                    return self.qRedisMultiGet(regionItemKeys);
+                else{
+
+                    var combinedKeys = [];
+                    for(var i=0; i < regionItemKeys.regions.length; i++)
+                    {
+                        var gKey = regionItemKeys.regions[i] + "|" + itemKey;
+                        combinedKeys.push(gKey);
+                    }
+
+                    console.log('Looking for region Item keys: ', combinedKeys);
+
+                    return self.qRedisMultiGet(combinedKeys);
+                }
             })
-            .then(function(allItems)
+            .then(function(allRegionInfo)
             {
                 if(emptyRegion)
                     return;
 
-//                console.log('Item returns: ', allItems);
+//                console.log('Item returns: ', allRegionInfo);
 
-                console.log('REgion Items Returned');
+                console.log('Items across regions returned');
 
-                for(var rKey in allItems)
+                for(var rKey in allRegionInfo)
                 {
-                    var cItem = allItems[rKey];
+                    var cItem = allRegionInfo[rKey];
                     var keySplit = rKey.split('|');
                     var region = keySplit[0];
-                    var item = keySplit[1];
 
                     //add to items that we know of!
-                    knownItems.push(item);
-
                     //Note that we've seen this item in this region
-
-                    if(!itemToRegionMap[item])
-                        itemToRegionMap[item] = [];
-
-                    itemToRegionMap[item].push(region);
 
                     //we need to know what item we've saving to our big mongo object lists
                     for(var i=0; i < cItem.confirmedBought.length; i++)
-                        cItem.confirmedBought[i].itemID = item;
+                        cItem.confirmedBought[i].regionID = region;
 
                     for(var i=0; i < cItem.confirmedSold.length; i++)
-                        cItem.confirmedSold[i].itemID = item;
-
+                        cItem.confirmedSold[i].regionID = region;
 
                     //now we concatenate all the items for the region
                     compileItem.confirmedBought = compileItem.confirmedBought.concat(cItem.confirmedBought);
                     compileItem.confirmedSold = compileItem.confirmedSold.concat(cItem.confirmedSold);
-
                 }
 
                 //now we've compiled a big old list of confirmed sales -- we can do whatever we want with them!
@@ -456,79 +461,10 @@ function DBSorter()
 
                 return self.qSaveMongoDB(compileItem);
             })
-            .then(function()
-            {
-                if(emptyRegion)
-                    return;
-
-//                console.log(knownItems);
-                //all saved to mongodb! Let's do meta stuff now
-                return self.qRedisGetItemMeta(knownItems);
-
-            })
-            .then(function(metaObject)
-            {
-                if(emptyRegion)
-                    return;
-
-                var itemList = metaObject.itemList;
-                var metaItemToRegion = metaObject.itemToRegion;
-
-                //if itemlist is undefined, we've never done this meta before
-
-                var iMap;
-                if(!itemList)
-                {
-                    iMap = {};
-                }
-                else
-                {
-                    iMap = itemList.knownMap;
-
-                    //here we combine our known itmes list
-                    for(var i=0; i < knownItems.length; i++)
-                        iMap[knownItems[i]] = true;
-                }
-
-                //now we replace itemlist with the new known map
-                //hooray
-                itemList =
-                {
-                    knownMap: iMap
-                };
-
-                //now we need to parse through the region info
-
-                for(var item in itemToRegionMap)
-                {
-                    if(!metaItemToRegion[item]){
-                        metaItemToRegion[item] = {
-                            regions : []
-                        }
-                    }
-                    metaItemToRegion[item].regions =  metaItemToRegion[item].regions.concat(itemToRegionMap[item])
-
-                    var nonDupe = {};
-                    for(var m =0; m < metaItemToRegion[item].regions.length; m++)
-                    {
-                        nonDupe[metaItemToRegion[item].regions[m]] = true;
-                    }
-                    //now create our non duplicated version
-                    metaItemToRegion[item].regions = Object.keys(nonDupe);
-
-                }
-
-
-                //now we should have all our info to save
-
-                console.log('Saving meta info');
-
-                return self.qRedisSetMeta(itemList, metaItemToRegion);
-            })
             .done(function()
             {
                 if(emptyRegion)
-                    console.log('Region was empty: ' + regionKey);
+                    console.log('Item was empty: ' + itemKey);
                 else
                     console.log("Item investigation completed!")
                 deferred.resolve();

@@ -1,0 +1,6 @@
+{
+    "regionID" : "String",
+    "confirmedBought": [{"price":"String", "quantity":"String", "stationID":"String", "itemID" : "String"}],
+    "confirmedSold":  [{"price":"String", "quantity":"String", "stationID":"String", "itemID" : "String"}]
+}
+

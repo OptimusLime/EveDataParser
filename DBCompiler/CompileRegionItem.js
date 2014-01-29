@@ -44,6 +44,8 @@ function RegionItemCompiler(CompileModel, RawModel)
         return deferred.promise;
     };
 
+
+
     self.qRedisGetObject = function(key)
     {
         var deferred = Q.defer();
@@ -289,7 +291,7 @@ function RegionItemCompiler(CompileModel, RawModel)
                             var price = iTrade[0].price;
                             var quantity = maxVol- minVol;
 
-                            var confirmed = {price: price, quantity: quantity};
+                            var confirmed = {price: price, quantity: quantity, stationID: iTrade[0].stationID};
 
                             //we are a buy order!
                             if(isBuy)

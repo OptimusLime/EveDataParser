@@ -11,7 +11,7 @@ var Maps = require("../IDMapping/IDMapLoader.js");
 //var DBRedisParser = require('./DBParser/DBRedisParser.js');
 //var parser = new DBRedisParser();
 
-var Compiler = require('./RunSorter.js');
+var Compiler = require('./RunFinal.js');
 
 var compiler = new Compiler();
 
@@ -24,7 +24,7 @@ var regionsAtATime = 0;
 
 var processNextRegion = function()
 {
-    compiler.qSortRegionData(startIx)
+    compiler.qFinalizeData(startIx)
         .done(function()
         {
             startIx++;
@@ -54,13 +54,20 @@ Maps.qEnsureMapsLoaded()
     {
         //switch to database 1!
 //        return compiler.qCompileData();
-        return compiler.qGetMetaList();
+        return compiler.qGetMetaItemList();
     })
-    .then(function(metaData)
+    .then(function(knownItems)
     {
-        var keyList = metaData.keyList;
+        var allItems = [];
+        var known = knownItems.knownMap;
+        for(var key in known)
+        {
+            allItems.push(key);
+        }
+
+        //
 //                var maxRegions = Math.min(2, keyList.length);
-        totalRegions = keyList.length;
+        totalRegions = allItems.length;
 
         setTimeout(processNextRegion, 0);
     })
