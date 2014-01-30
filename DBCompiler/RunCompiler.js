@@ -121,6 +121,11 @@ function DBCompiler()
     {
         var deferred = Q.defer();
 
+        if(dbVar == undefined)
+        {
+            deferred.reject("undefined db var flush attempted!");
+            return;
+        }
         self.qRedisSwitchDB(dbVar)
             .done(function()
             {
@@ -250,6 +255,8 @@ function DBCompiler()
 
         //we'll investigate these keys
         var regionKeysInvestigate = [];
+        //how many items to inverstigate this time
+        var itemsToInvestigate = [];
 
         //we're connected, now we need to switch redis
 
@@ -289,8 +296,7 @@ function DBCompiler()
             })
             .then(function(regionToMetaMap)
             {
-                //how many items to inverstigate this time
-                var itemsToInvestigate = [];
+
 
                 for(var regionMeta in regionToMetaMap)
                 {
@@ -316,12 +322,44 @@ function DBCompiler()
                 for(var i=0; i < itemsToInvestigate.length; i++)
                 {
                     var iti = itemsToInvestigate[i];
-                    promiseList.push(self.ItemCompiler.qProcessRegionItem(iti.region, iti.item));
+                    promiseList.push(self.ItemCompiler.qPreProcessRegionItem(iti.region, iti.item));
                 }
 
 //                console.log("Item investigation")
 
                 //                self.ItemCompiler.qProcessRegionItem()
+
+                console.log('Pre process requested');
+
+                return Q.all(promiseList);
+            })
+            .then(function()
+            {
+                console.log("Pre process finished")
+                var promiseList = [];
+                for(var i=0; i < itemsToInvestigate.length; i++)
+                {
+                    var iti = itemsToInvestigate[i];
+                    promiseList.push(self.ItemCompiler.qProcessRegionItem(iti.region, iti.item));
+                }
+
+                console.log("Process requested");
+
+                return Q.all(promiseList);
+            })
+            .then(function()
+            {
+                console.log('Processing finished!')
+                //finish by calling post process for each region
+
+                var promiseList = [];
+                for(var i=0; i < regionKeysInvestigate.length; i++)
+                {
+                    var ri = regionKeysInvestigate[i];
+                    var region =  ri.split("_")[0];
+
+                    promiseList.push(self.ItemCompiler.qPostProcessInfomation(region));
+                }
 
                 return Q.all(promiseList);
             })

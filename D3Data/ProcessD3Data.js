@@ -11,7 +11,7 @@ var Maps = require("../IDMapping/IDMapLoader.js");
 //var DBRedisParser = require('./DBParser/DBRedisParser.js');
 //var parser = new DBRedisParser();
 
-var Compiler = require('./RunFinal.js');
+var Compiler = require('./D3DataCreator.js');
 
 var compiler = new Compiler();
 
@@ -22,9 +22,12 @@ var regionsAtATime = 0;
 
 //process 1 region at a time
 
+
+var savedMeta = {};
 var processNextRegion = function()
 {
-    compiler.qFinalizeData(startIx)
+//    compiler.qCreateRegionData(startIx)
+    compiler.qCreateItemData(startIx)
         .done(function()
         {
             startIx++;
@@ -54,27 +57,36 @@ Maps.qEnsureMapsLoaded()
     {
         //switch to database 1!
 //        return compiler.qCompileData();
+        return compiler.qGetMetaList();
+    })
+    .then(function(regionData)
+    {
+        var keyList = regionData.keyList;
+        savedMeta.keyList = keyList;
         return compiler.qGetMetaItemList();
     })
-    .then(function(knownItems)
+    .then(function(iList)
     {
-        var allItems = [];
-        var known = knownItems.knownMap;
-        for(var key in known)
-        {
-            allItems.push(key);
-        }
+        var itemList = [];
+        for(var key in iList.knownMap)
+            itemList.push(key);
 
+        savedMeta.itemList = itemList;
         //
 //                var maxRegions = Math.min(2, keyList.length);
-//        totalRegions = 1;//allItems.length;
-        totalRegions = allItems.length;
+        totalRegions = savedMeta.itemList.length;//4;//keyList.length;
+//        totalRegions = keyList.length;
+//        startIx = totalRegions - 50;
+//        startIx = 1613;
+//        totalRegions = 1614;
+
+        console.log("Starting: ", startIx, " out of ", totalRegions)
 
         setTimeout(processNextRegion, 0);
     })
     .done(function()
     {
-        console.log('Beginning processing regions!');
+        console.log('Beginning processing regions! \n');
     },function(err)
     {
         console.log('Oh no error!', err);

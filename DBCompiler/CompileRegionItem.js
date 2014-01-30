@@ -7,6 +7,9 @@ var Q = require('q');
 var redis = require("redis")
     , client = redis.createClient();
 
+
+var lastKnownDBId = 10;
+
 module.exports = RegionItemCompiler;
 
 function numberWithCommas(x) {
@@ -22,6 +25,8 @@ function RegionItemCompiler(CompileModel, RawModel)
     self.redisClient = client;
     self.CompileModel = CompileModel;
     self.RawModel = RawModel;
+    self.allStationToTradeLists = {};
+    self.preProcessItems = {};
 
     self.qRedisSetObject = function(key, value)
     {
@@ -31,6 +36,35 @@ function RegionItemCompiler(CompileModel, RawModel)
             value = JSON.stringify(value);
 
         self.redisClient.set(key, value, function(err)
+        {
+            if(err)
+            {
+                deferred.reject(err);
+                return;
+            }
+
+            deferred.resolve();
+        });
+
+        return deferred.promise;
+    };
+
+    self.qRedisMultiSetObject = function(setDictionary)
+    {
+        var deferred = Q.defer();
+
+        var mSetList = [];
+        for(var key in setDictionary)
+        {
+            var value = setDictionary[key];
+            if(typeof value != "string")
+                value = JSON.stringify(value);
+
+            mSetList.push(key);
+            mSetList.push(value);
+        }
+
+        self.redisClient.mset(mSetList, function(err)
         {
             if(err)
             {
@@ -81,6 +115,35 @@ function RegionItemCompiler(CompileModel, RawModel)
         return deferred.promise;
     };
 
+    self.qFlushRedisDB = function(dbVar)
+    {
+        var deferred = Q.defer();
+
+        if(dbVar == undefined)
+        {
+            deferred.reject("undefined db var flush attempted!");
+            return;
+        }
+        self.qRedisSwitchDB(dbVar)
+            .done(function()
+            {
+                self.redisClient.FLUSHDB(function(err)
+                {
+                    console.log("Flush returned! ", err);
+                    if(err)
+                        deferred.reject(err);
+                    else
+                        deferred.resolve();
+                });
+            }, function(err)
+            {
+                deferred.reject(err);
+            });
+
+        return deferred.promise;
+
+    }
+
     self.batchKey = function(gKey, num)
     {
         return gKey + "_" + num;
@@ -108,6 +171,8 @@ function RegionItemCompiler(CompileModel, RawModel)
                 for(var d=0; d < oData.length; d++)
                 {
                     var tData = oData[d];
+                    //make sure to track the itemID
+                    tData.itemID = oData.itemID;
 
                     if(!mappedObjects[tData.tradeID])
                         mappedObjects[tData.tradeID] = [];
@@ -179,6 +244,30 @@ function RegionItemCompiler(CompileModel, RawModel)
 
     };
 
+    self.qPreProcessRegionItem = function(regionID, itemID)
+    {
+        var deferred = Q.defer();
+
+        var gKey = self.groupKey(regionID, itemID);
+
+        self.qRedisSwitchDB(0)
+            .then(function()
+            {
+                //get our meta information from redis
+                return self.qRedisGetObject(gKey);
+            }).done(function(gMetaInfo){
+
+                self.preProcessItems[gKey] = gMetaInfo;
+                deferred.resolve();
+            }, function(err)
+            {
+                deferred.reject(err);
+            });
+
+
+        return deferred.promise;
+
+    }
 
     //Let's create functions for processing an region/item
     self.qProcessRegionItem = function(regionID, itemID)
@@ -190,15 +279,14 @@ function RegionItemCompiler(CompileModel, RawModel)
         var investigateTrades;
         var useableData = false;
 
+        var stationItemCompiled = {};
+
         var confirmedSales = {};
 
-        self.qRedisSwitchDB(0)
+        self.qRedisSwitchDB(2)
             .then(function()
             {
-                //get our meta information from redis
-                return self.qRedisGetObject(gKey);
-            }).then(function(gMetaInfo){
-
+                var gMetaInfo = self.preProcessItems[gKey];
 //                console.log("Meta returned: ", gMetaInfo);
                 //we now have batch information
                 var total = gMetaInfo.totalCount;
@@ -239,10 +327,6 @@ function RegionItemCompiler(CompileModel, RawModel)
                 //will cause a skip at next step
                     investigateTrades = {};
 
-                return self.qRedisSwitchDB(2);
-            })
-            .then(function()
-            {
                 //now we have redis set to the right database, we enter meta info
                 //derka derk
 
@@ -267,12 +351,14 @@ function RegionItemCompiler(CompileModel, RawModel)
 
                 for(var key in investigateTrades.counts)
                 {
+                    var minVol = Number.MAX_VALUE;
+                    var maxVol = Number.MIN_VALUE;
+
                     //need at least 2 pieces of information to get anything at all
-                    if(investigateTrades.counts[key] > 1)
+                    if(investigateTrades.counts[key] > 0)
                     {
                         //
-                        var minVol = Number.MAX_VALUE;
-                        var maxVol = Number.MIN_VALUE;
+
                         var iTrade = investigateTrades.objects[key];
                         for(var i=0; i < iTrade.length; i++)
                         {
@@ -280,7 +366,7 @@ function RegionItemCompiler(CompileModel, RawModel)
                             maxVol = Math.max(iTrade[i].volRemain, maxVol);
                         }
 
-                        if(minVol != maxVol){
+                        if(minVol != maxVol && iTrade.length > 1){
 
 
                             //recorded buy/sell for this object in this region
@@ -312,6 +398,17 @@ function RegionItemCompiler(CompileModel, RawModel)
                                 compileInfo.avgPricePerSellOrder = numberWithCommas((compileInfo.totalSoldPrice/compileInfo.totalSoldQuantity).toFixed(2));
                             }
                         }
+
+
+                        //
+                        var cTrade = iTrade[0];
+                        //for each trade, compile list
+                        if(!stationItemCompiled[cTrade.stationID])
+                            stationItemCompiled[cTrade.stationID] = [];
+
+                        //only track what remains!
+                        cTrade.volRemain = minVol;
+                        stationItemCompiled[cTrade.stationID].push(cTrade);
                     }
                 }
 
@@ -329,13 +426,32 @@ function RegionItemCompiler(CompileModel, RawModel)
                     //if you don't have data, don't save anything,
                     //all done for now
                     //TODO: Mark processed information for region/item -- so data can be combined
-                    deferred.resolve();
+//                    deferred.resolve();
                 }
             })
-            .done(function()
-            {
+            .then(function(){
+                //now we want some other information
+                var count = 0;
+
+                if(!self.allStationToTradeLists[regionID])
+                    self.allStationToTradeLists[regionID] = {};
+
+                var multiObject = self.allStationToTradeLists[regionID];
+
+                for(var stationID in stationItemCompiled)
+                {
+                    var gKey = self.groupKey(stationID, itemID);
+                    multiObject[gKey] = {stationID: stationID, itemID: itemID, trades: stationItemCompiled[stationID]};
+                }
+
+//                if(count)
+//                    return self.qRedisMultiSetObject(multiObject);
+            })
+            .done(function(){
+
                 deferred.resolve();
-            }, function(err)
+            }
+            , function(err)
             {
                 deferred.reject(err);
             });
@@ -343,6 +459,40 @@ function RegionItemCompiler(CompileModel, RawModel)
         return deferred.promise;
 
     };
+
+    self.qPostProcessInfomation = function(regionID)
+    {
+        var deferred = Q.defer();
+
+        self.qRedisSwitchDB(lastKnownDBId)
+//            .then(function(){
+//                return self.qFlushRedisDB(lastKnownDBId);
+//            })
+            .then(function(){
+                var shouldWrite = false;
+                for(var key in self.allStationToTradeLists[regionID])
+                {
+                    //if we have even 1 key, it should be written
+                    shouldWrite = true;
+                    break;
+                }
+                //if we don't have anything to write, don't send it!
+                if(shouldWrite)
+                    return self.qRedisMultiSetObject(self.allStationToTradeLists[regionID]);
+            })
+            .done(function(){
+
+                deferred.resolve();
+            }
+            , function(err)
+            {
+                deferred.reject(err);
+            });
+
+
+        return deferred.promise;
+
+    }
 
 
 

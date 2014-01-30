@@ -11,7 +11,7 @@
             "regionID": "String",
             "systemID": "String",
             "stationID": "String",
-            "typeID": "String",
+            "itemID": "String",
             "bid": "String",
             "price": "String",
             "minVolume": "String",

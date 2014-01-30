@@ -398,6 +398,9 @@ function DBSorter()
 //            .then(function(){
 //                return self.qRedisSwitchDB(2);
 //            })
+        var allRegionInfo;
+        var combinedKeys;
+
         self.qRedisSwitchDB(3)
             .then(function()
             {
@@ -413,26 +416,32 @@ function DBSorter()
                 }
                 else{
 
-                    var combinedKeys = [];
+                    combinedKeys = [];
                     for(var i=0; i < regionItemKeys.regions.length; i++)
                     {
                         var gKey = regionItemKeys.regions[i] + "|" + itemKey;
                         combinedKeys.push(gKey);
                     }
 
-                    console.log('Looking for region Item keys: ', combinedKeys);
+//                    console.log('Looking for region Item keys: ', combinedKeys);
+                    return self.qRedisSwitchDB(2);
 
-                    return self.qRedisMultiGet(combinedKeys);
                 }
             })
-            .then(function(allRegionInfo)
+            .then(function()
+            {
+                return self.qRedisMultiGet(combinedKeys);
+            })
+            .then(function(regionInfo)
             {
                 if(emptyRegion)
                     return;
 
 //                console.log('Item returns: ', allRegionInfo);
+                allRegionInfo = regionInfo;
 
                 console.log('Items across regions returned');
+//                console.log(allRegionInfo);
 
                 for(var rKey in allRegionInfo)
                 {

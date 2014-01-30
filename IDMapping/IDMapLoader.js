@@ -4,7 +4,7 @@ var path = require('path');
 //This is a flow library for handling async tasks sequentially
 var Q = require('q');
 
-var MapManager = {};
+var MapManager = {GlobalMaps : undefined};
 
 module.exports = MapManager;
 
