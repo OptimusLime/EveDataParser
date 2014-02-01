@@ -1,0 +1,6 @@
+{
+    "batchID" : "String",
+    "tradeID": {"type": "String"},
+    "stationID":  {"type": "String"}
+}
+

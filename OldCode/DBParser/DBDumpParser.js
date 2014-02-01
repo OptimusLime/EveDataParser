@@ -288,7 +288,6 @@ function DBParser()
 
     self.qFindBatchObjects = function(batchList)
     {
-
         var deferred = Q.defer();
         var mappedObjects = {};
 
