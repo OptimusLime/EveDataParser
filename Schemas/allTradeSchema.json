@@ -1,0 +1,20 @@
+{
+    "fileID" : "String",
+    "modID" : "Number",
+    "observedData": [
+        {
+            "tradeID": "String",
+            "stationID": "String",
+            "itemID": "String",
+            "bid": "String",
+            "price": "String",
+            "volRemain": "String",
+            "volEnter": "String",
+            "issued": "String",
+            "duration": "String",
+            "minVolRemain" : "Number",
+            "maxVolRemain" :"Number"
+        }]
+
+}
+

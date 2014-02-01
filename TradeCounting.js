@@ -1,24 +1,17 @@
 //this file will run our stages on a DUMP file -- through and through -- or single stages
-var Stage0Class = require("./Stages/Stage0Trades.js");
-var Stage1Class = require("./Stages/Stage1Count.js");
-var Stage2Class = require("./Stages/Stage2Algorithm.js");
+var Stage0TradeClass = require("./Stages/Stage0Trades.js");
 var QFunctions = require("./Globals/qFunctions.js");
-
 
 var currentStage = 0;
 var allStages =
     [
-        new Stage0Class(),
-        new Stage1Class(),
-        new Stage2Class()
+        new Stage0TradeClass()
     ];
 var stageCount = allStages.length;
 
 var stageInput =
     [
-        ["Z:/Eve/Data/2014-01-29.dump"],
-        ["Z:/Eve/Data/2014-01-29.dump"],
-        ["Z:/Eve/Data/2014-01-29.dump"]
+        ["/eveDB/tmpData/2014-01-31.dump"]
     ];
 
 
@@ -66,11 +59,8 @@ var runSelectStages = function(start, finish)
 
 QFunctions.qConnect({},{})
     .then(function(){
-
         //only run select stages
         runSelectStages(0,1);
-
-
     });
 
 

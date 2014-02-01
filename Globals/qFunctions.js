@@ -50,14 +50,16 @@ function QFunctions()
     {
         rawBatch: "RawBatch",
         firstProcessRegion: "FirstProcessRegion",
-        secondProcessRegion: "SecondProcessRegion"
+        secondProcessRegion: "SecondProcessRegion",
+        allTrade : "AllTrade"
     };
 
     self.MongoModels =
     {
         RawModel : {},
         FirstProcessModel : {},
-        SecondProcessModel : {}
+        SecondProcessModel : {},
+        AllTradeModel : {}
     };
 
 //    self.qCreateMongooseAndRedisClients = function(mongoParams, redisParams)
@@ -97,6 +99,8 @@ function QFunctions()
                     readAll.push(self.qReadFile(path.resolve(__dirname, "../Schemas/rawTradeSchema.json")));
                     readAll.push(self.qReadFile(path.resolve(__dirname, "../Schemas/compileSchema.json")));
                     readAll.push(self.qReadFile(path.resolve(__dirname, "../Schemas/finalSchema.json")));
+                    readAll.push(self.qReadFile(path.resolve(__dirname, "../Schemas/allTradeSchema.json")));
+
                     return Q.all(readAll);
                 })
                 .then(function(filesRead)
@@ -105,17 +109,20 @@ function QFunctions()
                     var rtSchema = JSON.parse(filesRead[0]);
                     var fpRegion = JSON.parse(filesRead[1]);
                     var spRegion = JSON.parse(filesRead[2]);
+                    var atSchema = JSON.parse(filesRead[3]);
 
                     //now we have the actual schema
                     //we load it into our database as it's own database
                     self.generator.loadSingleSchema(self.MongoSchemas.rawBatch, rtSchema);
                     self.generator.loadSingleSchema(self.MongoSchemas.firstProcessRegion, fpRegion);
                     self.generator.loadSingleSchema(self.MongoSchemas.secondProcessRegion, spRegion);
+                    self.generator.loadSingleSchema(self.MongoSchemas.allTrade, atSchema);
 
                     //store the class inside the parser, we're ready to proceed with Dump parsing
                     self.MongoModels.RawModel = self.generator.getSchemaModel(self.MongoSchemas.rawBatch);
                     self.MongoModels.FirstProcessModel = self.generator.getSchemaModel(self.MongoSchemas.firstProcessRegion);
                     self.MongoModels.SecondProcessModel = self.generator.getSchemaModel(self.MongoSchemas.secondProcessRegion);
+                    self.MongoModels.AllTradeModel = self.generator.getSchemaModel(self.MongoSchemas.allTrade);
 
                     var mappingList = [];
 
