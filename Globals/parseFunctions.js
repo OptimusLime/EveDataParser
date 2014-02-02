@@ -64,11 +64,16 @@ function ParseFunctions()
     self.redisIdentifiers =
     {
         Stage1Count : 13,
+        Stage01AvgTrade : 2,
         Stage2Algorithm : 1
     };
     self.redisMetaKeys =
     {
         S1Summary : "summaryInformation"
+    };
+    self.MongoMetaKeys =
+    {
+        SplitTradeMod : 1000
     };
 
     self.processTradeLine = function(line)

@@ -270,6 +270,20 @@ function QFunctions()
         });
     };
 
+    self.qRedisSetDBThenMultiSet = function(dbVal, setDictionary)
+    {
+        return self.wrapQFunction(function(success, failure)
+        {
+            self.qRedisSwitchDB(dbVal)
+                .then(function()
+                {
+                   return self.qRedisMultiSetObject(setDictionary)
+                })
+                .done(function(){success();}, function(err){failure(err);});
+        });
+    };
+
+
     self.qRedisMultiSetObject = function(setDictionary)
     {
         return self.wrapQFunction(function(success, failure)
@@ -594,6 +608,22 @@ function QFunctions()
             });
         });
     };
+
+    self.qCountMongoObjects = function(Model, query)
+    {
+        return self.wrapQFunction(function(success, failure)
+        {
+            Model.count(query).lean().exec(function(err, count)
+            {
+                if(err)
+                    failure(err);
+                else
+                    success(count);
+            });
+        });
+    };
+
+
 
     self.qMongoClearDB = function(ModelToClear, clearQuery)
     {

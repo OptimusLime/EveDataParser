@@ -11,7 +11,7 @@ function Stage1Class()
 
     var fileID;
 
-    var splitTradeMod = 1000;
+    var splitTradeMod = ParseFunctions.MongoMetaKeys.SplitTradeMod;
     var uniqueModTrades = {};
 
     //just a simple wrapper, doesn't do anything but send back what it got in

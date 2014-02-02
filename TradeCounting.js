@@ -1,17 +1,20 @@
 //this file will run our stages on a DUMP file -- through and through -- or single stages
 var Stage0TradeClass = require("./Stages/Stage0Trades.js");
+var Stage01Avg = require("./Stages/Stage01AvgTrade.js");
 var QFunctions = require("./Globals/qFunctions.js");
 
 var currentStage = 0;
 var allStages =
     [
-        new Stage0TradeClass()
+        new Stage0TradeClass(),
+        new Stage01Avg()
     ];
 var stageCount = allStages.length;
 
 var stageInput =
     [
-        ["/eveDB/tmpData/2014-01-31.dump"]
+        ["/eveDB/tmpData/2014-01-31.dump"],
+        []
     ];
 
 
@@ -32,7 +35,7 @@ var processNextStage = function()
         .done(function()
         {
             currentStage++;
-            if(currentStage == stageCount)
+            if(currentStage >= stageCount)
             {
                 console.log("Finished processing all ", stageCount, " stages!");
             }
@@ -60,7 +63,7 @@ var runSelectStages = function(start, finish)
 QFunctions.qConnect({},{})
     .then(function(){
         //only run select stages
-        runSelectStages(0,1);
+        runSelectStages(1,2);
     });
 
 
